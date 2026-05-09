@@ -1,0 +1,1 @@
+// egui app trait实现ui相关的代码
