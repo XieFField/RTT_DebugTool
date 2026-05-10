@@ -4,3 +4,22 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+# 调试器驱动
+probe-rs = "0.27"
+
+# 异步 + 线程
+tokio = { version = "1", features = ["full"] }
+
+# GUI
+eframe = "0.31"
+egui = "0.31"
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# 错误处理
+anyhow = "1"
+
+# 日志
+tracing = "0.1"
+tracing-subscriber = "0.3"
