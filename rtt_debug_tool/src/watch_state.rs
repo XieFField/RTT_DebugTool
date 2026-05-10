@@ -130,7 +130,7 @@ impl WatchState {
         if parts.len() == 1 {
             // 叶子节点 — 直接更新值
             root.value = value.to_string();
-            root.is_struct = false;
+            root.is_struct = false;   
             self.update_index(path, Access::ReadWrite);
         } else {
             // 多级路径 — 递归创建/更新子节点
