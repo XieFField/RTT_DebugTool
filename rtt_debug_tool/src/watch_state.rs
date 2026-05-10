@@ -10,7 +10,7 @@ use std::collections::HashMap;
 // 基础类型
 // ═══════════════════════════════════════════════════════════
 
-/// 读写权限 (与 MCU 侧 `Access` 保持一致)
+/// 读写权限
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Access {
     ReadOnly,
