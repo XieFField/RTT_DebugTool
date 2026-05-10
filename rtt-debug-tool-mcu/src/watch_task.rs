@@ -1,9 +1,40 @@
-//! @file watch_task.rs
-//! @brief 上行发送和下行接收，并在此规定协议
-//! 上行协议：arm.target_height=500.000\n
-//!           写命令反馈：OK arm.target_height=600.000\n  ERR bad_path: not found\n
-//! 下行协议：set arm.target_height 600.0\n 格式：set + 空格 + path + 空格 + value + \n
-//! 通道分配： up0 用于rprintln! up1 用于上行协议 down0 用于下行协议
+//! # 后台遥测任务与通信协议
+//!
+//! 通过 RTT 双工通道实现 MCU ↔ 宿主机通信:
+//!
+//! - **上行 (up ch1)**: MCU 周期发送观测值 → 宿主机刷新 UI
+//! - **下行 (down ch0)**: 宿主机发送写命令 → MCU 修改变量
+//!
+//! ## 协议格式
+//!
+//! ### 上行 (遥测 + 反馈)
+//!
+//! ```text
+//! arm.pitch.rpm=1000.5\n       ← 遥测数据
+//! arm.voltage=24.0\n
+//! OK arm.pitch.rpm=1100.0\n     ← 写成功反馈
+//! ERR bad_path: not found\n     ← 写失败反馈
+//! ```
+//!
+//! ### 下行 (写命令)
+//!
+//! ```text
+//! set arm.pitch.rpm 1100.0\n    ← 格式: set + 空格 + path + 空格 + value + \n
+//! ```
+//!
+//! ## 通道分配
+//!
+//! | 通道 | 方向 | 用途 |
+//! |------|------|------|
+//! | up ch0 | MCU → Host | `rprintln!` 日志 |
+//! | up ch1 | MCU → Host | Watch 遥测 + 反馈 |
+//! | down ch0 | Host → MCU | Watch 写命令 |
+//!
+//! ## 频率关系
+//!
+//! 宿主机刷新频率 = MCU 遥测频率 × 75% (向上取整)。
+//! 默认: MCU 40Hz (25ms), Host 30Hz。
+//! 上限: MCU 1000Hz (1ms)。
 
 use core::fmt::Write;
 use embassy_time::{Duration, Timer};
@@ -12,35 +43,73 @@ use rtt_target::{UpChannel, DownChannel, ChannelMode};
 
 use crate::watch_table;
 
-// 上行缓冲区常量
-/// 上行本地累积缓冲大小 
-/// 序列化后先存这里, 再分批 write 到 RTT
+// ═══════════════════════════════════════════════════════════
+// 缓冲区常量
+// ═══════════════════════════════════════════════════════════
+
+/// 上行本地累积缓冲大小 (4096 字节)。
+///
+/// 遥测数据先序列化到此缓冲, 再分批 `write()` 到 RTT 通道,
+/// 防止单次写入超过 RTT 缓冲区容量。
 const UP_BUF_SIZE: usize = 4096;
 
-/// 下行单次接收缓冲大小
+/// 下行单次接收缓冲大小 (128 字节)。
 const DOWN_BUF_SIZE: usize = 128;
 
-/// 下行行缓冲大小 一行命令最大长度
+/// 下行行缓冲大小 (一行命令最大 128 字节)。
 const DOWN_LINE_SIZE: usize = 128;
 
-/// 遥测配置参数
+// ═══════════════════════════════════════════════════════════
+// WatchConfig
+// ═══════════════════════════════════════════════════════════
+
+/// 遥测配置参数。
+///
+/// 用户只需设定 MCU 侧频率, 宿主机频率和周期自动推算。
+///
+/// # 自动推算规则
+///
+/// - `period_ms = ceil(1000 / mcu_freq_hz)`, 非整数毫秒向上取整
+/// - `host_freq_hz = ceil(mcu_freq_hz × 75%)`
+///
+/// # 示例
+///
+/// ```
+/// use rtt_debug_tool_mcu::watch_task::WatchConfig;
+///
+/// // 默认 40Hz
+/// let cfg = WatchConfig::default();
+/// assert_eq!(cfg.mcu_freq_hz, 40);
+/// assert_eq!(cfg.host_freq_hz, 30);
+/// assert_eq!(cfg.period_ms, 25);
+///
+/// // 自定义 100Hz
+/// let cfg = WatchConfig::from_freq(100);
+/// assert_eq!(cfg.mcu_freq_hz, 100);
+/// assert_eq!(cfg.host_freq_hz, 75);
+/// assert_eq!(cfg.period_ms, 10);
+/// ```
 #[derive(Clone, Copy)]
 pub struct WatchConfig {
-    /// MCU 侧遥测频率 (Hz), 1..=1000
+    /// MCU 侧遥测频率 (Hz), 范围 `1..=1000`
     pub mcu_freq_hz: u16,
 
-    /// 宿主机侧刷新频率 (Hz), 由 mcu_freq_hz × 75% 向上取整
+    /// 宿主机侧刷新频率 (Hz), 由 `mcu_freq_hz × 75%` 自动推算
     pub host_freq_hz: u16,
 
-    /// 遥测周期 (ms), ceil(1000 / mcu_freq_hz)
+    /// 遥测周期 (ms), `ceil(1000 / mcu_freq_hz)`
     pub period_ms: u64,
 
-    /// 每次遥测最多遍历的条目数
+    /// 每次遥测最多遍历的条目数 (默认 64)
     pub max_entries: usize,
 }
 
 impl WatchConfig {
-    /// - 默认配置: MCU 40Hz → host 30Hz, period 25ms, max 64 条目
+    /// 默认配置。
+    ///
+    /// - MCU: 40Hz (周期 25ms)
+    /// - Host: 30Hz
+    /// - 最多 64 条目
     pub const fn default() -> Self {
         Self {
             mcu_freq_hz:  40,
@@ -50,10 +119,15 @@ impl WatchConfig {
         }
     }
 
-    /// ## 从 MCU 频率创建配置, 自动推算 host 频率和周期
-    /// - freq 范围: 1..=1000 Hz, 越界自动钳位
-    /// - period_ms = ceil(1000 / freq), 非整数毫秒向上取整
-    /// - host_freq_hz = ceil(freq × 3 / 4), 即 MCU 频率的 75% 向上取整
+    /// 从 MCU 频率创建配置。
+    ///
+    /// # 参数
+    ///
+    /// - `freq`: MCU 遥测频率 (Hz), `1..=1000`, 越界自动钳位
+    ///
+    /// # 返回
+    ///
+    /// 自动推算 `host_freq_hz` 和 `period_ms` 的配置
     pub const fn from_freq(freq: u16) -> Self {
         let mcu = if freq < 1 {
             1
@@ -62,9 +136,7 @@ impl WatchConfig {
         } else {
             freq
         };
-        // ceil(1000 / mcu)
         let period = (1000u32 + mcu as u32 - 1) / mcu as u32;
-        // ceil(mcu * 3 / 4)
         let host = ((mcu as u32 * 3 + 3) / 4) as u16;
 
         Self {
@@ -76,17 +148,23 @@ impl WatchConfig {
     }
 }
 
+// ═══════════════════════════════════════════════════════════
+// watch_config! 宏
+// ═══════════════════════════════════════════════════════════
 
-/// ## 快捷配置遥测参数
+/// 快捷创建 [`WatchConfig`]。
 ///
-/// 用户只需设定 MCU 侧频率, host 频率和周期自动推算
+/// 用户只需设定 MCU 频率, host 频率和周期自动推算。
 ///
-/// ### 用法
-/// ```ignore
-/// // 使用默认值 40Hz MCU, 30Hz host
+/// # 用法
+///
+/// ```
+/// use rtt_debug_tool_mcu::watch_config;
+///
+/// // 默认 (40Hz MCU, 30Hz host, 64 条目)
 /// let cfg = watch_config!();
 ///
-/// // 自定义频率
+/// // 自定义频率 100Hz → host 75Hz, 周期 10ms
 /// let cfg = watch_config!(freq: 100);
 ///
 /// // 自定义频率 + 条目上限
@@ -107,16 +185,49 @@ macro_rules! watch_config {
     }};
 }
 
-/// ## RTT Watch 后台任务
+// ═══════════════════════════════════════════════════════════
+// debug_watch_task
+// ═══════════════════════════════════════════════════════════
+
+/// RTT Watch 后台任务。
 ///
 /// 两个职责交替循环:
-/// 1. 上行遥测: 遍历注册表 → 序列化到本地缓冲 → 分批写入 RTT up 通道
-/// 2. 下行命令: 非阻塞轮询 RTT down 通道 → 解析 "set path value\n" → 写入目标变量
+///
+/// 1. **上行遥测**: 遍历 [`WATCH_TABLE`], 序列化每个条目的当前值
+///    为 `"path=value\n"`, 分批写入 RTT up 通道
+/// 2. **下行命令**: 非阻塞轮询 RTT down 通道, 解析 `"set path value\n"`,
+///    写入目标变量, 反馈 `"OK"` / `"ERR"` 到 up 通道
 ///
 /// # 参数
-/// - `up_ch`:   RTT up channel 1, 用于发送遥测数据和命令反馈
-/// - `down_ch`: RTT down channel 0, 用于接收写命令
-/// - `config`:  遥测配置 (频率 / 条目数)
+///
+/// - `up_ch`: RTT up channel 1 — 遥测 + 反馈
+/// - `down_ch`: RTT down channel 0 — 收写命令
+/// - `config`: 遥测频率 / 条目数配置
+///
+/// # 启动方式
+///
+/// ```ignore
+/// // 1. 初始化 RTT 多通道
+/// let channels = rtt_init! {
+///     up:   { 0: { size: 1024, name: "Terminal" }
+///             1: { size: 1024, name: "Watch" } }
+///     down: { 0: { size: 128,  name: "Command" } }
+/// };
+/// rtt_target::set_print_channel(channels.up.0);  // rprintln! 走 ch0
+///
+/// // 2. 启动任务
+/// spawner.must_spawn(debug_watch_task(
+///     channels.up.1,
+///     channels.down.0,
+///     watch_config!(),
+/// ));
+/// ```
+///
+/// # 上行缓冲
+///
+/// 遥测数据先序列化到本地 4096B 缓冲, 再分批 `write()` 到 RTT。
+/// 若单条数据超出缓冲剩余空间, 跳过本条, 下个周期重发。
+/// RTT 通道使用 `NoBlockTrim` 模式: 能写多少写多少, 不阻塞 CPU。
 #[embassy_executor::task]
 pub async fn debug_watch_task(
     mut up_ch: UpChannel,
@@ -125,44 +236,33 @@ pub async fn debug_watch_task(
 ) -> ! {
     let period = Duration::from_millis(config.period_ms);
 
-    // 上行缓冲: 先在本地序列化, 再分批 write 到 RTT
     let mut up_buf: [u8; UP_BUF_SIZE] = [0u8; UP_BUF_SIZE];
-
-    // 下行缓冲
     let mut down_buf: [u8; DOWN_BUF_SIZE] = [0u8; DOWN_BUF_SIZE];
     let mut down_line: String<DOWN_LINE_SIZE> = String::new();
 
-    // 使用 NoBlockTrim 模式: 能写多少写多少, 不阻塞, 不丢弃
+    // NoBlockTrim: 写多少算多少, 不丢数据, 不阻塞
     up_ch.set_mode(ChannelMode::NoBlockTrim);
 
     loop {
-        // ═══════════════════════════════════════════════════
-        // 1. 上行遥测
-        // ═══════════════════════════════════════════════════
-
+        // ── 1. 上行遥测 ──
         let mut up_len: usize = 0;
 
         watch_table::with_table(|table| {
             let n = table.len().min(config.max_entries as usize);
-            for i in 0..n 
+            for i in 0..n
             {
-                // 缓冲剩余空间不足一条最大长度时停止 (预留 64 字节余量)
+                // 缓冲剩余不足 64 字节时停止 (避免拼接中途溢出)
                 if up_len + 64 > up_buf.len() { break; }
 
-                if let Some(entry) = table.get(i) 
+                if let Some(entry) = table.get(i)
                 {
-                    if let Some(val) = (entry.read_fn)(entry.ptr) 
+                    if let Some(val) = (entry.read_fn)(entry.ptr, entry.field_idx)
                     {
-                        // 拼接 "path=value\n"
                         let path_bytes = entry.path.as_bytes();
                         let val_bytes  = val.as_bytes();
-
-                        // 检查是否放得下
                         let needed = path_bytes.len() + 1 + val_bytes.len() + 1;
-                        if up_len + needed > up_buf.len() 
-                        {
-                            continue; // 跳过本条, 下个周期再发
-                        }
+
+                        if up_len + needed > up_buf.len() { continue; }
 
                         up_buf[up_len..up_len + path_bytes.len()]
                             .copy_from_slice(path_bytes);
@@ -182,40 +282,32 @@ pub async fn debug_watch_task(
             }
         });
 
-        // 分批写入 RTT  NoBlockTrim 模式下每次 write 返回实际写入字节
+        // 分批写入 RTT
         if up_len > 0 {
             let mut offset: usize = 0;
             while offset < up_len {
                 let n = up_ch.write(&up_buf[offset..up_len]);
-                if n == 0 {
-                    // 缓冲区满, 剩余数据下个周期再发
-                    break;
-                }
+                if n == 0 { break; }
                 offset += n;
             }
         }
 
-        //轮询下行指令
+        // ── 2. 下行命令 ──
         let n = down_ch.read(&mut down_buf);
-        if n > 0 
+        if n > 0
         {
-            for &byte in &down_buf[..n] 
+            for &byte in &down_buf[..n]
             {
                 if byte == b'\n' {
-                    // 收到完整一行 → 处理
                     handle_cmd(&down_line, &mut up_ch);
                     down_line.clear();
                 } else if down_line.len() < down_line.capacity() {
-                    // 行缓冲未满, 追加字符
                     let _ = down_line.push(byte as char);
                 }
             }
         }
 
-        // ═══════════════════════════════════════════════════
-        // 3. 等待下一周期
-        // ═══════════════════════════════════════════════════
-
+        // ── 3. 等待 ──
         Timer::after(period).await;
     }
 }
@@ -224,21 +316,34 @@ pub async fn debug_watch_task(
 // 下行命令处理
 // ═══════════════════════════════════════════════════════════
 
-/// 解析并执行一行命令, 结果回写到 up_ch
+/// 解析并执行一行下行命令, 结果回写到 up 通道。
+///
+/// # 命令格式
+///
+/// ```text
+/// set <path> <value>\n
+/// ```
+///
+/// - path: 观测路径 (如 `"arm.pitch.rpm"`)
+/// - value: 新值字符串 (会被 [`WatchValue::watch_write`] 解析)
+///
+/// # 反馈格式
+///
+/// ```text
+/// OK arm.pitch.rpm=1100.0\n        ← 写入成功
+/// ERR arm.pitch.rpm: readonly\n    ← 只读变量
+/// ERR arm.pitch.rpm: not found\n   ← 路径不存在
+/// ERR arm.pitch.rpm: parse error\n ← 值解析失败
+/// ```
 fn handle_cmd(line: &str, up_ch: &mut UpChannel) {
     let line = line.trim();
-    if line.is_empty() {
-        return;
-    }
+    if line.is_empty() { return; }
 
-    // 格式: "set path value"
-    let Some(rest) = line.strip_prefix("set ") else {
-        return;
-    };
+    let Some(rest) = line.strip_prefix("set ") else { return; };
 
-    // 找到 path 和 value 的分界 (最后一个空格)
+    // path 和 value 以最后一个空格分界
     let Some(sep) = rest.rfind(' ') else {
-        let _ = write!(up_ch, "ERR parse: 需要 'set path value'\n");
+        let _ = write!(up_ch, "ERR parse: expected 'set path value'\n");
         return;
     };
 
@@ -246,7 +351,7 @@ fn handle_cmd(line: &str, up_ch: &mut UpChannel) {
     let value = rest[sep + 1..].trim();
 
     if path.is_empty() || value.is_empty() {
-        let _ = write!(up_ch, "ERR parse: 空的 path 或 value\n");
+        let _ = write!(up_ch, "ERR parse: empty path or value\n");
         return;
     }
 
