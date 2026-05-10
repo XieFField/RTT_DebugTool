@@ -1,0 +1,12 @@
+[package]
+name = "rtt-debug-tool-mcu"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+heapless = "0.9"
+critical-section = "1.2"
+embassy-time = "0.5"
+rtt-target = "0.6"
+rtt-debug-tool-mcu-derive = { path = "../rtt-debug-tool-mcu-derive" }
+embassy-executor = { version = "0.9", features = ["executor-thread"] }
