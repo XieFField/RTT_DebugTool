@@ -50,6 +50,7 @@ pub struct VarInfo {
 // ═══════════════════════════════════════════════════════════
 
 /// 全局观测状态, 由 RTT Reader 线程写入, UI 线程读取。
+#[derive(Clone)]
 pub struct WatchState {
     /// 顶层条目列表 (按注册顺序)
     pub roots: Vec<VarInfo>,
@@ -60,6 +61,7 @@ pub struct WatchState {
 }
 
 /// 叶子节点引用
+#[derive(Clone)]
 struct LeafRef {
     path: String,
     access: Access,

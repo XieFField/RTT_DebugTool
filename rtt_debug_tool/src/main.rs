@@ -1,61 +1,125 @@
 //! RTT Debug Tool — 宿主机侧。
 //!
-//! 通过调试器连接目标板, 实时接收 RTT 遥测数据并以 Watch 窗口展示。
+//! 通过调试器连接目标板, 实时接收 RTT 遥测并展示 Watch Tree UI。
 
 use clap::Parser;
-use rtt_debug_tool::rtt_io::RttClient;
-use rtt_debug_tool::watch_state::VarInfo;
+use rtt_debug_tool::app::RttWatchApp;
 
-/// RTT Debug Tool — 嵌入式实时调试工具
 #[derive(Parser, Debug)]
 #[command(name = "rtt-debug-tool", version = "0.1.0")]
 struct Args {
-    /// 目标芯片型号
     #[arg(short, long, default_value = "STM32H723ZG")]
     chip: String,
 
-    /// RTT 上行通道号 (MCU → PC)
     #[arg(long, default_value = "1")]
     up_ch: usize,
 
-    /// RTT 下行通道号 (PC → MCU)
     #[arg(long, default_value = "0")]
     down_ch: usize,
+
+    /// 探针 SWD 时钟速度 (kHz), 默认 5000
+    #[arg(long, default_value = "5000")]
+    speed: u32,
 }
 
-fn main() -> anyhow::Result<()> {
+fn main() {
     let args = Args::parse();
 
-    println!("RTT Debug Tool v0.1.0");
-    println!("  芯片: {}", args.chip);
-    println!("  RTT up={} down={}", args.up_ch, args.down_ch);
+    let native_options = eframe::NativeOptions {
+        viewport: egui::ViewportBuilder::default()
+            .with_inner_size([800.0, 600.0])
+            .with_min_inner_size([500.0, 300.0])
+            .with_title("RTT Debug Tool"),
+        ..Default::default()
+    };
 
-    let client = RttClient::connect(&args.chip, args.up_ch, args.down_ch)?;
-    println!("已连接, 等待遥测数据...\n");
-
-    // 终端模式: 每秒打印当前遥测树
-    loop {
-        std::thread::sleep(std::time::Duration::from_secs(1));
-        let state = client.state.read().unwrap();
-        if state.roots.is_empty() {
-            println!("  (暂无遥测数据)");
-        } else {
-            for root in &state.roots {
-                print_tree(root, 0);
-            }
-        }
-        println!();
-    }
+    eframe::run_native(
+        "RTT Debug Tool",
+        native_options,
+        Box::new(|cc| {
+            setup_chinese_fonts(&cc.egui_ctx);
+            Ok(Box::new(RttWatchApp::new(
+                args.chip.clone(),
+                args.up_ch,
+                args.down_ch,
+                args.speed,
+            )))
+        }),
+    ).expect("eframe 启动失败");
 }
 
-fn print_tree(node: &VarInfo, depth: usize) {
-    let indent = "  ".repeat(depth);
-    if node.is_struct {
-        println!("{}▾ {} [Struct]", indent, node.name);
-        for child in &node.children {
-            print_tree(child, depth + 1);
+/// 注入系统中文等宽字体, 解决 egui 默认字体无法渲染中文的问题。
+fn setup_chinese_fonts(ctx: &egui::Context) {
+    use egui::{FontData, FontDefinitions, FontFamily};
+
+    let mut fonts = FontDefinitions::default();
+
+    // Windows 中文字体候选 (按优先级)
+    let chinese_font_names = [
+        "Microsoft YaHei",  // 微软雅黑
+        "SimHei",            // 黑体
+        "SimSun",            // 宋体
+        "Noto Sans CJK SC",  // Linux
+        "PingFang SC",       // macOS
+    ];
+
+    // 尝试加载第一个可用的系统字体
+    for name in &chinese_font_names {
+        if let Some(data) = try_load_system_font(name) {
+            fonts
+                .font_data
+                .insert(name.to_string(), FontData::from_owned(data).into());
+            // 将中文字体插入 Proportional 和 Monospace 的最前面
+            fonts
+                .families
+                .entry(FontFamily::Proportional)
+                .or_default()
+                .insert(0, name.to_string());
+            fonts
+                .families
+                .entry(FontFamily::Monospace)
+                .or_default()
+                .insert(1, name.to_string()); // 保留默认等宽在前
+            break;
         }
-    } else {
-        println!("{}  {} = {} ({})", indent, node.name, node.value, node.access);
     }
+
+    ctx.set_fonts(fonts);
+}
+
+#[cfg(target_os = "windows")]
+fn try_load_system_font(name: &str) -> Option<Vec<u8>> {
+    use std::fs;
+    // Windows 字体目录
+    let fonts_dir = std::path::Path::new("C:/Windows/Fonts");
+    // 尝试常见扩展名
+    for ext in &["ttf", "ttc", "otf"] {
+        let path = fonts_dir.join(format!("{}.{}", name, ext));
+        if let Ok(data) = fs::read(&path) {
+            return Some(data);
+        }
+    }
+    // 某些字体名与文件名不同, 尝试 msyh (微软雅黑简写)
+    let aliases: &[(&str, &[&str])] = &[
+        ("Microsoft YaHei", &["msyh.ttf", "msyh.ttc"]),
+        ("SimHei", &["simhei.ttf"]),
+        ("SimSun", &["simsun.ttf", "simsun.ttc"]),
+    ];
+    for (alias_name, files) in aliases {
+        if name == *alias_name {
+            for file in *files {
+                let path = fonts_dir.join(file);
+                if let Ok(data) = fs::read(&path) {
+                    return Some(data);
+                }
+            }
+        }
+    }
+    None
+}
+
+#[cfg(not(target_os = "windows"))]
+fn try_load_system_font(_name: &str) -> Option<Vec<u8>> {
+    // Linux/macOS: 尝试用 fontconfig 或直接读路径
+    None
 }

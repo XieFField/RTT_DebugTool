@@ -137,12 +137,15 @@ pub trait WatchValue: Sized + 'static {
 
 macro_rules! impl_watch_num {
     ($ty:ty, $kind:ident, $name:literal) => {
+        impl_watch_num!($ty, $kind, $name, "{}");
+    };
+    ($ty:ty, $kind:ident, $name:literal, $fmt:literal) => {
         impl WatchValue for $ty {
             fn watch_kind() -> WatchValueKind { WatchValueKind::$kind }
             fn watch_type_name() -> &'static str { $name }
             fn watch_read(val: &Self) -> String<32> {
                 let mut s = String::new();
-                let _ = core::write!(s, "{}", val);
+                let _ = core::write!(s, $fmt, val);
                 s
             }
             fn watch_write(raw: &str) -> Option<Self> { raw.parse().ok() }
@@ -150,8 +153,8 @@ macro_rules! impl_watch_num {
     };
 }
 
-impl_watch_num!(f32, F32, "f32");
-impl_watch_num!(f64, F64, "f64");
+impl_watch_num!(f32, F32, "f32", "{:.6}");
+impl_watch_num!(f64, F64, "f64", "{:.12}");
 impl_watch_num!(i8,  I8,  "i8");
 impl_watch_num!(i16, I16, "i16");
 impl_watch_num!(i32, I32, "i32");

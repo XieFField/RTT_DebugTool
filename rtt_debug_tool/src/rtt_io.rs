@@ -11,30 +11,55 @@ use anyhow::{Context, Result};
 use super::watch_state::WatchState;
 
 // ═══════════════════════════════════════════════════════════
+// ProbeInfo — 调试器信息
+// ═══════════════════════════════════════════════════════════
+
+/// 调试器条目信息 (供 UI 选择)
+#[derive(Clone, Debug)]
+pub struct ProbeInfo {
+    pub index: usize,
+    pub name: String,
+    pub serial: String,
+}
+
+/// 枚举当前连接的所有调试器
+pub fn list_probes() -> Vec<ProbeInfo> {
+    use probe_rs::probe::list::Lister;
+    let lister = Lister::new();
+    lister
+        .list_all()
+        .into_iter()
+        .enumerate()
+        .map(|(i, p)| ProbeInfo {
+            index: i,
+            name: p.identifier.clone(),
+            serial: p.serial_number.unwrap_or_default(),
+        })
+        .collect()
+}
+
+// ═══════════════════════════════════════════════════════════
 // RttClient
 // ═══════════════════════════════════════════════════════════
 
 /// RTT 通信客户端。
-///
-/// 构造时自动连接 probe、attach 芯片、定位 RTT 通道、启动后台线程。
 pub struct RttClient {
-    /// 下行写命令通道 (用户 → 后台线程)
     cmd_tx: mpsc::Sender<String>,
-    /// 后台线程退出信号
     stop_tx: Option<mpsc::Sender<()>>,
     /// 共享观测状态, 后台线程写入, UI 线程读取
     pub state: Arc<RwLock<WatchState>>,
 }
 
 impl RttClient {
-    /// 连接到调试器并启动 RTT 通信。
+    /// 连接到指定索引的调试器并启动 RTT 通信。
     ///
     /// # 参数
     ///
+    /// - `probe_index`: 调试器索引 (0-based), 用于多探头选择
     /// - `chip`: 目标芯片名, 如 `"STM32H723ZG"`
     /// - `up_ch`: 上行遥测通道号 (默认 1)
     /// - `down_ch`: 下行命令通道号 (默认 0)
-    pub fn connect(chip: &str, up_ch: usize, down_ch: usize) -> Result<Self> {
+    pub fn connect(probe_index: usize, speed_khz: u32, chip: &str, up_ch: usize, down_ch: usize) -> Result<Self> {
         let chip = chip.to_string();
         let (cmd_tx, cmd_rx) = mpsc::channel::<String>();
         let (stop_tx, stop_rx) = mpsc::channel::<()>();
@@ -42,7 +67,7 @@ impl RttClient {
         let state_clone = Arc::clone(&state);
 
         thread::spawn(move || {
-            if let Err(e) = rtt_thread(&chip, up_ch, down_ch, cmd_rx, stop_rx, state_clone) {
+            if let Err(e) = rtt_thread(probe_index, speed_khz, &chip, up_ch, down_ch, cmd_rx, stop_rx, state_clone) {
                 eprintln!("[RTT] 后台线程错误: {:?}", e);
             }
         });
@@ -55,8 +80,6 @@ impl RttClient {
     }
 
     /// 发送下行写命令到 MCU。
-    ///
-    /// 格式: `set <path> <value>\n`
     pub fn send_cmd(&self, path: &str, value: &str) {
         let frame = WatchState::encode_write_cmd(path, value);
         let _ = self.cmd_tx.send(frame);
@@ -76,6 +99,8 @@ impl Drop for RttClient {
 // ═══════════════════════════════════════════════════════════
 
 fn rtt_thread(
+    probe_index: usize,
+    speed_khz: u32,
     chip: &str,
     up_ch: usize,
     down_ch: usize,
@@ -87,15 +112,28 @@ fn rtt_thread(
     use probe_rs::rtt::Rtt;
     use probe_rs::Permissions;
 
-    // ── 1. 枚举调试器 ──
+    // ── 1. 枚举并选择调试器 ──
     let lister = Lister::new();
     let probes = lister.list_all();
-    let probe = probes
+    if probes.is_empty() {
+        anyhow::bail!("未找到调试器, 请连接 DAP-Link / ST-Link");
+    }
+
+    let mut probe = probes
         .into_iter()
-        .next()
-        .context("未找到调试器")?
+        .nth(probe_index)
+        .with_context(|| {
+            format!(
+                "调试器索引 {} 不存在 (共 {} 个调试器)",
+                probe_index,
+                lister.list_all().len()
+            )
+        })?
         .open()
         .context("无法打开调试器")?;
+
+    // ── 设置探针速度 ──
+    let _ = probe.set_speed(speed_khz);
 
     // ── 2. attach 芯片 ──
     let mut session = probe
@@ -105,18 +143,17 @@ fn rtt_thread(
     // ── 3. Core 0 ──
     let mut core = session.core(0).context("无法访问 Core 0")?;
 
-    // ── 4. 初始化 RTT, 验证通道存在 ──
-    let mut rtt = Rtt::attach(&mut core).context("RTT 初始化失败")?;
+    // ── 4. 初始化 RTT ──
+    let mut rtt = Rtt::attach(&mut core).context("RTT 初始化失败, 请确认 MCU 已烧录运行")?;
 
-    // 验证通道存在 (但不持有引用, 避免同时借用 up + down)
     if rtt.up_channel(up_ch).is_none() {
-        anyhow::bail!("未找到 RTT up ch {}", up_ch);
+        anyhow::bail!("未找到 RTT up ch {} (MCU 是否已初始化 RTT?)", up_ch);
     }
     if rtt.down_channel(down_ch).is_none() {
         anyhow::bail!("未找到 RTT down ch {}", down_ch);
     }
 
-    eprintln!("[RTT] 已连接: chip={}, up_ch={}, down_ch={}", chip, up_ch, down_ch);
+    eprintln!("[RTT] 已连接 probe#{}, chip={}, up_ch={}, down_ch={}", probe_index, chip, up_ch, down_ch);
 
     // ── 5. 主循环 ──
     let mut line_buf = String::new();
@@ -128,13 +165,11 @@ fn rtt_thread(
             break;
         }
 
-        // 上行: 读遥测 (每次循环重新获取通道引用, 借出完即释放)
         if let Some(up) = rtt.up_channel(up_ch) {
             match up.read(&mut core, &mut read_buf) {
                 Ok(n) if n > 0 => {
                     let text = String::from_utf8_lossy(&read_buf[..n]);
                     line_buf.push_str(&text);
-
                     while let Some(pos) = line_buf.find('\n') {
                         let line = line_buf[..pos].to_string();
                         line_buf = line_buf[pos + 1..].to_string();
@@ -144,14 +179,13 @@ fn rtt_thread(
                     }
                 }
                 Ok(_) => {}
-                Err(e) => {
-                    eprintln!("[RTT] 读错误: {:?}", e);
-                    thread::sleep(Duration::from_millis(10));
+                Err(_e) => {
+                    // DAP-Link 偶尔丢包, 静默重试
+                    thread::sleep(Duration::from_millis(20));
                 }
             }
         }
 
-        // 下行: 发写命令
         while let Ok(cmd) = cmd_rx.try_recv() {
             if let Some(down) = rtt.down_channel(down_ch) {
                 if let Err(e) = down.write(&mut core, cmd.as_bytes()) {
@@ -160,7 +194,7 @@ fn rtt_thread(
             }
         }
 
-        thread::sleep(Duration::from_millis(1));
+        thread::sleep(Duration::from_millis(10));
     }
 
     Ok(())
