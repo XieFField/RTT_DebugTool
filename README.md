@@ -16,4 +16,4 @@ A Debug Tool based on <a href="https://github.com/probe-rs/probe-rs">Probe-rs</a
 </p>
 
 ## Preview
-(image\ui.png) (image\ui.png)
+![预览](./image/ui.png) ![预览](./image/ui2.png)
