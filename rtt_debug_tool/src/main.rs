@@ -1,7 +1,5 @@
-//! RTT Debug Tool — 宿主机侧。
-//!
-//! 通过调试器连接目标板, 实时接收 RTT 遥测并展示 Watch Tree UI。
 
+#![windows_subsystem = "windows"]
 use clap::Parser;
 use rtt_debug_tool::app::RttWatchApp;
 
@@ -23,6 +21,8 @@ struct Args {
 }
 
 fn main() {
+
+
     let args = Args::parse();
 
     let native_options = eframe::NativeOptions {
@@ -120,6 +120,6 @@ fn try_load_system_font(name: &str) -> Option<Vec<u8>> {
 
 #[cfg(not(target_os = "windows"))]
 fn try_load_system_font(_name: &str) -> Option<Vec<u8>> {
-    // Linux/macOS: 尝试用 fontconfig 或直接读路径
+    // 额，其实没试过在其他系统上运行这个工具，先返回 None 吧
     None
 }
