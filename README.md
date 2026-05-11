@@ -13,7 +13,7 @@ A Debug Tool based on <a href="https://github.com/probe-rs/probe-rs">Probe-rs</a
   Languages:
   <a href="./README.md">简体中文</a> ·
   <a href="./docs/README_en.md">English</a> ·
-<\p>
+</p>
 
 ## Preview
 (image\ui.png) (image\ui.png)
