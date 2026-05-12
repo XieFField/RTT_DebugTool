@@ -118,9 +118,9 @@ fn access_label(access: Access) -> RichText {
 /// 类型颜色
 fn type_color(type_name: &str) -> Color32 {
     match type_name {
-        "f32" | "f64"                          => Color32::WHITE,
-        "i8" | "i16" | "i32" | "i64"           => Color32::from_rgb(100, 200, 255),
-        "u8" | "u16" | "u32" | "u64"           => Color32::from_rgb(100, 220, 255),
+        "f32" | "f64"                            => Color32::WHITE,
+        "i8" | "i16" | "i32" | "i64"             => Color32::from_rgb(100, 200, 255),
+        "u8" | "u16" | "u32" | "u64"             => Color32::from_rgb(100, 220, 255),
         "bool"                                   => Color32::from_rgb(255, 220, 100),
         _ if type_name.starts_with("Str")        => Color32::from_rgb(255, 150, 200),
         _                                        => Color32::from_rgb(255, 180, 100), // struct/unknown → 橙色

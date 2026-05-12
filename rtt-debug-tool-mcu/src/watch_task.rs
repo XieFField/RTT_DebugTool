@@ -430,15 +430,12 @@ pub async fn debug_watch_task_uart(
             let _ = uart.write(&up_buf[..up_len]).await;
         }
 
-        // ── 2. select: timer 到点 vs DMA 收到下行命令 ──
         // Uart 自带 async fn read(&mut self, &mut [u8]) — DMA 驱动, 不占 CPU
         let tick = Timer::after(period);
         let rx_fut = uart.read(&mut down_buf);
 
         match select(tick, rx_fut).await {
-            Either::First(_) => {
-                // timer 到期 → 下一轮上行
-            }
+            Either::First(_) => {}// timer 到期 → 下一轮上行
             Either::Second(rx_result) => {
                 if let Ok(()) = rx_result {
                     // DMA 读成功 — 可能读到 0..n 字节
@@ -447,7 +444,8 @@ pub async fn debug_watch_task_uart(
                         if byte == b'\n' {
                             handle_cmd_uart_line(&down_line, &mut uart).await;
                             down_line.clear();
-                        } else if down_line.len() < down_line.capacity() {
+                        } 
+                        else if down_line.len() < down_line.capacity() {
                             let _ = down_line.push(byte as char);
                         }
                     }
