@@ -42,7 +42,7 @@ use heapless::String;
 use rtt_target::{UpChannel, DownChannel, ChannelMode};
 use embassy_stm32::usart::Uart;
 use embassy_stm32::mode::Async;
-use embassy_futures::select::{select, Either};
+use embedded_hal_nb::serial::Read as NbRead;
 use crate::watch_table;
 
 // ═══════════════════════════════════════════════════════════
@@ -397,11 +397,10 @@ pub async fn debug_watch_task_uart(
 ) -> ! {
     let period = Duration::from_millis(config.period_ms);
     let mut up_buf: [u8; UP_BUF_SIZE] = [0u8; UP_BUF_SIZE];
-    let mut down_buf: [u8; DOWN_BUF_SIZE] = [0u8; DOWN_BUF_SIZE];
     let mut down_line: String<DOWN_LINE_SIZE> = String::new();
 
     loop {
-        // ── 1. 上行: 序列化遥测 → async DMA TX ──
+        // ── 1. 上行 ──
         let mut up_len: usize = 0;
         watch_table::with_table(|table| {
             let n = table.len().min(config.max_entries as usize);
@@ -430,27 +429,27 @@ pub async fn debug_watch_task_uart(
             let _ = uart.write(&up_buf[..up_len]).await;
         }
 
-        // Uart 自带 async fn read(&mut self, &mut [u8]) — DMA 驱动, 不占 CPU
-        let tick = Timer::after(period);
-        let rx_fut = uart.read(&mut down_buf);
+        // ── 2. 下行: nb_read 直接读 DMA 环形缓冲区, 周期内持续轮询 ──
+        let deadline = embassy_time::Instant::now() + period;
 
-        match select(tick, rx_fut).await {
-            Either::First(_) => {}// timer 到期 → 下一轮上行
-            Either::Second(rx_result) => {
-                if let Ok(()) = rx_result {
-                    // DMA 读成功 — 可能读到 0..n 字节
-                    for &byte in down_buf.iter() {
-                        if byte == 0 { break; } // 未填充部分跳过
-                        if byte == b'\n' {
-                            handle_cmd_uart_line(&down_line, &mut uart).await;
-                            down_line.clear();
-                        } 
-                        else if down_line.len() < down_line.capacity() {
-                            let _ = down_line.push(byte as char);
-                        }
+        loop {
+            if embassy_time::Instant::now() >= deadline { break; }
+
+            match NbRead::read(&mut uart) {
+                // uart.read() = embedded_hal_nb::serial::Read<u8>::read()
+                // DMA 后台填充环形缓冲区, 此调用只读指针, 无数据立刻 WouldBlock
+                Ok(byte) => {
+                    if byte == b'\n' {
+                        handle_cmd_uart_line(&down_line, &mut uart).await;
+                        down_line.clear();
+                    } else if down_line.len() < down_line.capacity() {
+                        let _ = down_line.push(byte as char);
                     }
                 }
-                // 收到命令后不等 timer, 直接开始下一轮上行
+                Err(nb::Error::WouldBlock) => {
+                    Timer::after(Duration::from_millis(1)).await;
+                }
+                Err(_) => break,
             }
         }
     }

@@ -117,6 +117,7 @@ fn uart_thread(
 
         // 下行: 发写命令
         while let Ok(cmd) = cmd_rx.try_recv() {
+            eprintln!("[UART TX] {}", cmd.trim());
             if let Err(e) = port.write_all(cmd.as_bytes()) {
                 eprintln!("[UART] 写错误: {:?}", e);
             }

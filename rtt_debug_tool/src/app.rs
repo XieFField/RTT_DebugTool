@@ -131,7 +131,7 @@ impl RttWatchApp {
     }
 
     fn commit_edit(&mut self, path: &str, value: &str) {
-        eprintln!("[CMD] set {} {}", path, value);
+        eprintln!("[EDIT] set {} = {}", path, value);
         match self.mode {
             Mode::Swd => { if let Some(ref c) = self.client_rtt { c.send_cmd(path, value); } }
             Mode::Uart => { if let Some(ref c) = self.client_uart { c.send_cmd(path, value); } }
@@ -298,6 +298,15 @@ impl eframe::App for RttWatchApp {
             });
         });
 
+        // Enter: commit edit, Esc: cancel
+        if ctx.input(|i| i.key_pressed(egui::Key::Enter)) {
+            if let Some((path, buf)) = self.editing.take() {
+                self.commit_edit(&path, &buf);
+            }
+        }
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            self.editing = None;
+        }
         if ctx.input(|i| i.key_pressed(egui::Key::R)) { ctx.request_repaint(); }
         if self.running { ctx.request_repaint_after(std::time::Duration::from_millis(50)); }
     }

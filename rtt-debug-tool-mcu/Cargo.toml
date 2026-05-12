@@ -11,4 +11,6 @@ rtt-target = "0.6"
 rtt-debug-tool-mcu-derive = { path = "../rtt-debug-tool-mcu-derive" }
 embassy-executor = { version = "0.9", features = ["executor-thread"] }
 embassy-futures = "0.1"
+embedded-hal-nb = "1"
+nb = "1"
 embassy-stm32 = {version = "0.6.0", features = ["unstable-pac", "stm32h723zg"] }

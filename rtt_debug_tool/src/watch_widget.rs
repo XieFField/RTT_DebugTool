@@ -69,18 +69,16 @@ pub fn render_tree(
                 let is_editing = editing.as_ref().map_or(false, |(p, _)| p == &var.path);
 
                 if is_editing && running {
-                    // 编辑模式
                     if let Some((_, buf)) = editing {
                         let resp = ui.add(
                             egui::TextEdit::singleline(buf)
                                 .desired_width(90.0)
                                 .font(egui::TextStyle::Body)
+                            // 关闭 Enter 自动提交, 改用手动提交
+                            .hint_text("edit then click away")
                         );
-                        if resp.lost_focus() || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                            result = Some(buf.clone()); // 提交
-                        }
-                        if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-                            result = Some(String::new()); // 取消
+                        if resp.lost_focus() {
+                            result = Some(buf.clone());
                         }
                     }
                 } else {

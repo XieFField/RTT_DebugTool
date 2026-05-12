@@ -1,5 +1,5 @@
 
-#![windows_subsystem = "windows"]
+// #![windows_subsystem = "windows"]  // 调试期间注释, 否则 eprintln! 无输出
 use clap::Parser;
 use rtt_debug_tool::app::RttWatchApp;
 
