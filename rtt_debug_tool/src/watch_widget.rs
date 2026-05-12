@@ -81,12 +81,14 @@ pub fn render_tree(
                             result = Some(buf.clone());
                         }
                     }
-                } else {
+                } 
+                else {
                     // 显示模式
                     let enabled = running && var.access == Access::ReadWrite;
                     let val_color = if enabled {
                         value_type_color(&var.type_name)
-                    } else {
+                    } 
+                    else {
                         Color32::from_gray(120) // 冻结/只读时灰
                     };
                     let btn = egui::Button::new(RichText::new(&var.value).color(val_color))
