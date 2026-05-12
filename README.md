@@ -16,4 +16,4 @@ A Debug Tool based on <a href="https://github.com/probe-rs/probe-rs">Probe-rs</a
 </p>
 
 ## Preview
-<img src="./image/ui.png" width="49%" /> <img src="./image/ui2.png" width="49%" />
+<img src="./image/uart_connect.png" width="49%" /> <img src="./image/swd_connect.png" width="49%" />
