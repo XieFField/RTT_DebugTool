@@ -1,6 +1,6 @@
 [package]
 name = "rtt_debug_tool"
-version = "0.2.0"
+version = "1.0.0"
 edition = "2024"
 build = "build.rs"
 authors = ["XieFField <3432674139@qq.com>"]
