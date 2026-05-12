@@ -18,20 +18,20 @@ A Debug Tool based on <a href="https://github.com/probe-rs/probe-rs">Probe-rs</a
 <div align="center">
 <h2>页面预览</h2>
 
-<!-- 2×2 表格：描述行 + 图片行 -->
-<table style="width: 100%; margin: 10px auto; border-collapse: collapse;">
+<!-- 表格宽度100%，无左右外边距，完全撑满 -->
+<table style="width: 100%; margin: 0; border-collapse: collapse;">
   <!-- 第一行：描述文字 -->
   <tr>
-    <th style="padding: 8px; border: 1px solid #ddd;text-align: center; vertical-align: middle;">UART 连接图</th>
-    <th style="padding: 8px; border: 1px solid #ddd;text-align: center; vertical-align: middle;">SWD 连接图</th>
+    <th style="padding: 6px 2px; border: 1px solid #ddd; text-align: center; vertical-align: middle;">UART 连接图</th>
+    <th style="padding: 6px 2px; border: 1px solid #ddd; text-align: center; vertical-align: middle;">SWD 连接图</th>
   </tr>
-  <!-- 第二行：等高图片 -->
+  <!-- 第二行：图片横向撑满单元格、高度放大、不变形 -->
   <tr>
-    <td style="padding: 8px; border: 1px solid #ddd;text-align: center; vertical-align: middle;">
-      <img src="./image/uart_connect.png" height="300" style="height: 300px; width: auto;" alt="UART连接">
+    <td style="padding: 2px; border: 1px solid #ddd; text-align: center; vertical-align: middle;">
+      <img src="./image/uart_connect.png" height="420" style="height: 420px; width: 100%; object-fit: contain;" alt="UART连接">
     </td>
-    <td style="padding: 8px; border: 1px solid #ddd;text-align: center; vertical-align: middle;">
-      <img src="./image/swd_connect.png" height="300" style="height: 300px; width: auto;" alt="SWD连接">
+    <td style="padding: 2px; border: 1px solid #ddd; text-align: center; vertical-align: middle;">
+      <img src="./image/swd_connect.png" height="420" style="height: 420px; width: 100%; object-fit: contain;" alt="SWD连接">
     </td>
   </tr>
 </table>
