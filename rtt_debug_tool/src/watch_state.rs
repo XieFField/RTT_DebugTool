@@ -86,30 +86,35 @@ impl WatchState {
     /// 处理一行上游遥测数据。
     ///
     /// 格式:
-    /// - `"arm.pitch.rpm=1000.5"` → 遥测, 更新值
-    /// - `"OK arm.pitch.rpm=1100.0"` → 写成功确认 (值已被 MCU 更新, 下个遥测帧会反映)
-    /// - `"ERR arm.pitch.rpm: readonly"` → 写失败, 忽略
+    /// - `"arm.pitch.rpm=1000.5,RW"` → 遥测 + 权限
+    /// - `"OK ..."` `"ERR ..."` → 反馈, 忽略
     pub fn handle_line(&mut self, line: &str) {
         let line = line.trim();
         if line.is_empty() { return; }
 
-        // 跳过反馈行 (仅日志用, 不影响树)
         if line.starts_with("OK ") || line.starts_with("ERR ") {
             return;
         }
 
-        // "path=value"
-        if let Some((path, value)) = line.split_once('=') {
-            self.upsert(path, value);
+        // "path=value,RW" 或 "path=value,RO"
+        if let Some((rest, access_flag)) = line.rsplit_once(',') {
+            let access = match access_flag {
+                "RW" => Access::ReadWrite,
+                _    => Access::ReadOnly,
+            };
+            if let Some((path, value)) = rest.split_once('=') {
+                self.upsert(path, value, access);
+            }
+        } else if let Some((path, value)) = line.split_once('=') {
+            // 兼容旧格式 (无权限字段), 默认 ReadWrite
+            self.upsert(path, value, Access::ReadWrite);
         }
     }
 
-    /// 插入或更新一个 path 的值, 重建沿途树节点
-    fn upsert(&mut self, path: &str, value: &str) {
+    fn upsert(&mut self, path: &str, value: &str, access: Access) {
         let parts: Vec<&str> = path.split('.').collect();
         if parts.is_empty() { return; }
 
-        // 在 roots 中查找/创建顶层节点
         let root_name = parts[0].to_string();
         let root_idx = self.roots.iter().position(|r| r.name == root_name);
 
@@ -121,7 +126,7 @@ impl WatchState {
                 path: root_name.clone(),
                 value: String::new(),
                 type_name: String::new(),
-                access: Access::ReadWrite, // 默认, 后续会由叶子覆盖
+                access,
                 is_struct: parts.len() > 1,
                 children: Vec::new(),
             };
@@ -130,19 +135,18 @@ impl WatchState {
         };
 
         if parts.len() == 1 {
-            // 叶子节点 — 直接更新值
             root.value = value.to_string();
-            root.is_struct = false;   
-            self.update_index(path, Access::ReadWrite);
+            root.is_struct = false;
+            root.access = access;
+            self.update_index(path, access);
         } else {
-            // 多级路径 — 递归创建/更新子节点
             root.is_struct = true;
-            Self::upsert_children(root, &parts[1..], value, path);
-            self.update_index(path, Access::ReadWrite);
+            Self::upsert_children(root, &parts[1..], value, path, access);
+            self.update_index(path, access);
         }
     }
 
-    fn upsert_children(parent: &mut VarInfo, parts: &[&str], value: &str, full_path: &str) {
+    fn upsert_children(parent: &mut VarInfo, parts: &[&str], value: &str, full_path: &str, access: Access) {
         let name = parts[0].to_string();
         let child_idx = parent.children.iter().position(|c| c.name == name);
 
@@ -155,7 +159,7 @@ impl WatchState {
                 path: current_path,
                 value: String::new(),
                 type_name: String::new(),
-                access: Access::ReadWrite,
+                access,
                 is_struct: parts.len() > 1,
                 children: Vec::new(),
             };
@@ -166,9 +170,10 @@ impl WatchState {
         if parts.len() == 1 {
             child.value = value.to_string();
             child.is_struct = false;
+            child.access = access;
         } else {
             child.is_struct = true;
-            Self::upsert_children(child, &parts[1..], value, full_path);
+            Self::upsert_children(child, &parts[1..], value, full_path, access);
         }
     }
 

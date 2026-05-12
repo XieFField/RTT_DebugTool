@@ -85,6 +85,7 @@ impl RttWatchApp {
     }
 
     fn connect(&mut self) {
+        self.disconnect(); // 先断开旧连接
         match self.mode {
             Mode::Swd => {
                 if self.probes.is_empty() {
@@ -184,8 +185,10 @@ impl eframe::App for RttWatchApp {
             // ── Row 0: 模式选择 ──
             ui.horizontal(|ui| {
                 ui.label("Mode:");
-                ui.selectable_value(&mut self.mode, Mode::Swd, "SWD (Probe)");
-                ui.selectable_value(&mut self.mode, Mode::Uart, "UART (COM)");
+                if ui.selectable_value(&mut self.mode, Mode::Swd, "SWD (Probe)").clicked()
+                || ui.selectable_value(&mut self.mode, Mode::Uart, "UART (COM)").clicked() {
+                    self.disconnect();
+                }
 
                 ui.separator();
 
@@ -197,11 +200,13 @@ impl eframe::App for RttWatchApp {
                             else if self.probe_index < self.probes.len() {
                                 format!("[{}] {}", self.probe_index, self.probes[self.probe_index].name)
                             } else { format!("idx {}", self.probe_index) };
+                        let old_probe = self.probe_index;
                         egui::ComboBox::from_id_salt("probe").selected_text(&txt).show_ui(ui, |ui| {
                             for (i, p) in self.probes.iter().enumerate() {
                                 ui.selectable_value(&mut self.probe_index, i, format!("[{}] {} S/N:{}", i, p.name, p.serial));
                             }
                         });
+                        if self.probe_index != old_probe { self.disconnect(); }
                         if ui.button("R").clicked() { self.refresh_probes(); }
                         ui.label("SWD:");
                         ui.add(egui::DragValue::new(&mut self.speed_khz).clamp_range(100..=50000).suffix(" kHz").speed(100));
@@ -211,6 +216,7 @@ impl eframe::App for RttWatchApp {
                         if self.com_ports.is_empty() {
                             ui.label("(none)");
                         } else {
+                            let old_com = self.com_index;
                             egui::ComboBox::from_id_salt("com").selected_text(&self.com_port).show_ui(ui, |ui| {
                                 for (i, p) in self.com_ports.iter().enumerate() {
                                     if ui.selectable_label(i == self.com_index, p).clicked() {
@@ -218,6 +224,7 @@ impl eframe::App for RttWatchApp {
                                     }
                                 }
                             });
+                            if self.com_index != old_com { self.disconnect(); }
                         }
                         if ui.button("R").clicked() { self.refresh_ports(); }
                         ui.label("Baud:");
@@ -244,10 +251,18 @@ impl eframe::App for RttWatchApp {
 
                 let avail = ui.available_width();
                 ui.add_sized(
-                    egui::Vec2::new((avail - 50.0).max(120.0), 0.0),
+                    egui::Vec2::new((avail - 80.0).max(120.0), 0.0),
                     egui::TextEdit::singleline(&mut self.search_filter).hint_text("filter..."),
                 );
                 if ui.button("R").clicked() { ctx.request_repaint(); }
+                let clr_btn = egui::Button::new(RichText::new("Clear").color(Color32::WHITE))
+                    .fill(Color32::from_rgb(60, 150, 60))
+                    .min_size(egui::Vec2::new(50.0, 0.0));
+                if ui.add(clr_btn).clicked() {
+                    self.disconnect();
+                    self.frozen = WatchState::new();
+                    *self.state.write().unwrap() = WatchState::new();
+                }
             });
             ui.separator();
 

@@ -260,9 +260,15 @@ pub async fn debug_watch_task(
                 {
                     if let Some(val) = (entry.read_fn)(entry.ptr, entry.field_idx)
                     {
+                        use crate::watch_value::Access;
                         let path_bytes = entry.path.as_bytes();
                         let val_bytes  = val.as_bytes();
-                        let needed = path_bytes.len() + 1 + val_bytes.len() + 1;
+                        let access_bytes: &[u8] = match entry.access {
+                            Access::ReadWrite => b",RW",
+                            Access::ReadOnly  => b",RO",
+                        };
+                        let needed = path_bytes.len() + 1 + val_bytes.len()
+                            + access_bytes.len() + 1;
 
                         if up_len + needed > up_buf.len() { continue; }
 
@@ -276,6 +282,10 @@ pub async fn debug_watch_task(
                         up_buf[up_len..up_len + val_bytes.len()]
                             .copy_from_slice(val_bytes);
                         up_len += val_bytes.len();
+
+                        up_buf[up_len..up_len + access_bytes.len()]
+                            .copy_from_slice(access_bytes);
+                        up_len += access_bytes.len();
 
                         up_buf[up_len] = b'\n';
                         up_len += 1;
@@ -408,9 +418,14 @@ pub async fn debug_watch_task_uart(
                 if up_len + 64 > up_buf.len() { break; }
                 if let Some(entry) = table.get(i) {
                     if let Some(val) = (entry.read_fn)(entry.ptr, entry.field_idx) {
+                        use crate::watch_value::Access;
                         let pb = entry.path.as_bytes();
                         let vb = val.as_bytes();
-                        let needed = pb.len() + 1 + vb.len() + 1;
+                        let ab: &[u8] = match entry.access {
+                            Access::ReadWrite => b",RW",
+                            Access::ReadOnly  => b",RO",
+                        };
+                        let needed = pb.len() + 1 + vb.len() + ab.len() + 1;
                         if up_len + needed > up_buf.len() { continue; }
                         up_buf[up_len..up_len + pb.len()].copy_from_slice(pb);
                         up_len += pb.len();
@@ -418,6 +433,8 @@ pub async fn debug_watch_task_uart(
                         up_len += 1;
                         up_buf[up_len..up_len + vb.len()].copy_from_slice(vb);
                         up_len += vb.len();
+                        up_buf[up_len..up_len + ab.len()].copy_from_slice(ab);
+                        up_len += ab.len();
                         up_buf[up_len] = b'\n';
                         up_len += 1;
                     }
