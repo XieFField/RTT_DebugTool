@@ -14,14 +14,37 @@ A Debug Tool based on <a href="https://github.com/probe-rs/probe-rs">Probe-rs</a
   <a href="./README.md">简体中文</a> ·
   <a href="./docs/README_en.md">English</a> ·
 </p>
+<hr style="height:2px; background-color:#eee; border:none;">
+<div align="center">
+<h2>页面预览</h2>
+
+<!-- 2×2 表格：描述行 + 图片行 -->
+<table style="width: 85%; margin: 10px auto; border-collapse: collapse;">
+  <!-- 第一行：描述文字 -->
+  <tr>
+    <th style="padding: 8px; border: 1px solid #ddd;text-align: center; vertical-align: middle;">UART 连接图</th>
+    <th style="padding: 8px; border: 1px solid #ddd;text-align: center; vertical-align: middle;">SWD 连接图</th>
+  </tr>
+  <!-- 第二行：等高图片 -->
+  <tr>
+    <td style="padding: 8px; border: 1px solid #ddd;text-align: center; vertical-align: middle;">
+      <img src="./image/uart_connect.png" height="300" style="height: 300px; width: auto;" alt="UART连接">
+    </td>
+    <td style="padding: 8px; border: 1px solid #ddd;text-align: center; vertical-align: middle;">
+      <img src="./image/swd_connect.png" height="300" style="height: 300px; width: auto;" alt="SWD连接">
+    </td>
+  </tr>
+</table>
+</div>
+
+<br>
+<hr style="height:2px; background-color:#eee; border:none;">
 
 <div align="center">
-<h2>
-页面预览
-</h2>
-  <img src="./image/uart_connect.png" height="200" style="height: 200px; width: auto;" alt="图1">
-  <img src="./image/swd_connect.png" height="200" style="height: 200px; width: auto;" alt="图2">
- 
-  
+<h2><span style="color:#1890ff">如何使用RTT_DebugTool?</span></h2>
 </div>
+<br>
+
+### 第一步 下载rtt-debug
+
 
