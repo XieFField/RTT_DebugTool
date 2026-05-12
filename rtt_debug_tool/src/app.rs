@@ -131,6 +131,7 @@ impl RttWatchApp {
     }
 
     fn commit_edit(&mut self, path: &str, value: &str) {
+        eprintln!("[CMD] set {} {}", path, value);
         match self.mode {
             Mode::Swd => { if let Some(ref c) = self.client_rtt { c.send_cmd(path, value); } }
             Mode::Uart => { if let Some(ref c) = self.client_uart { c.send_cmd(path, value); } }
