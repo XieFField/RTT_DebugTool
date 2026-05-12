@@ -19,11 +19,9 @@ A Debug Tool based on <a href="https://github.com/probe-rs/probe-rs">Probe-rs</a
 <h2>
 页面预览
 </h2>
-  <img src="./image/uart_connect.png" width="500" alt="串口模式">
-  <br>
-  <p>串口模式</p>
-  <hr>
-  <img src="./image/swd_connect.png" width="500" alt="SWD模式" />
-  <p>SWD模式</p>
+  <img src="./image/uart_connect.png" height="200" style="height: 200px; width: auto;" alt="图1">
+  <img src="./image/swd_connect.png" height="200" style="height: 200px; width: auto;" alt="图2">
+ 
+  
 </div>
 
