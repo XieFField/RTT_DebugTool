@@ -45,6 +45,20 @@ A Debug Tool based on <a href="https://github.com/probe-rs/probe-rs">Probe-rs</a
 </div>
 <br>
 
-### 第一步 下载rtt-debug
+### 第一步 下载MCU侧的依赖
+mcu侧总共两个依赖，但你只需要下载rtt-debug-tool-mcu即可
+```bash
+cargo add rtt-debug-tool-mcu
+```
+`rtt-debug-tool-mcu`库不提供任何特性。
+你必须自己显式依赖` embassy-stm32 `并指定芯片型号，**因为芯片选择权已经交还给你**
+
+### 第二步 下载RTT-DebugTool 主机软件
+你可以下载仓库中的源码，`cargo run -p rtt-debug-tool`
+也可以选择下载仓库`release`中的.exe文件直接运行，两种方式的效果都是相同的。
+
+
+
+
 
 

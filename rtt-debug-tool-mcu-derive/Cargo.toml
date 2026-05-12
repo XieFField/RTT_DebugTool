@@ -1,8 +1,15 @@
 [package]
 name = "rtt-debug-tool-mcu-derive"
-version = "0.2.0"
+version = "0.1.0"
 edition = "2024"
-
+license = "MIT"
+authors = ["XieFField <3432674139@qq.com>"]
+description = "RTT Debug Tool - MCU调试工具的派生宏库"
+metadata.wix.help_url = "https://github.com/XieFField/RTT_DebugTool"
+repository = "https://github.com/XieFField/RTT_DebugTool"
+documentation = "https://github.com/XieFField/RTT_DebugTool"
+homepage = "https://github.com/XieFField/RTT_DebugTool"
+metadata.wix.eula = false 
 [lib]
 proc-macro = true
 
