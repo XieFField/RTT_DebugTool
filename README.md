@@ -19,7 +19,7 @@ A Debug Tool based on <a href="https://github.com/probe-rs/probe-rs">Probe-rs</a
 <h2>页面预览</h2>
 
 <!-- 2×2 表格：描述行 + 图片行 -->
-<table style="width: 85%; margin: 10px auto; border-collapse: collapse;">
+<table style="width: 100%; margin: 10px auto; border-collapse: collapse;">
   <!-- 第一行：描述文字 -->
   <tr>
     <th style="padding: 8px; border: 1px solid #ddd;text-align: center; vertical-align: middle;">UART 连接图</th>
