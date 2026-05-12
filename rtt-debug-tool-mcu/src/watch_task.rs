@@ -40,7 +40,9 @@ use core::fmt::Write;
 use embassy_time::{Duration, Timer};
 use heapless::String;
 use rtt_target::{UpChannel, DownChannel, ChannelMode};
-
+use embassy_stm32::usart::Uart;
+use embassy_stm32::mode::Async;
+use embassy_futures::select::{select, Either};
 use crate::watch_table;
 
 // ═══════════════════════════════════════════════════════════
@@ -364,3 +366,130 @@ fn handle_cmd(line: &str, up_ch: &mut UpChannel) {
         }
     }
 }
+
+// ═══════════════════════════════════════════════════════════
+// UART 传输版本 — Uart<'static, Async> 具体类型, 可用 embassy task 宏
+// ═══════════════════════════════════════════════════════════
+// TX 走 async Write (DMA), RX 走 nb read (DMA 后台收, CPU 只读状态寄存器)
+// nb 不是阻塞轮询 — DMA 硬件在后台填充 RX FIFO, read() 只检查是否有新数据
+
+/// RTT Watch 后台任务 — UART 串口传输版本。
+///
+/// 接口和 [`debug_watch_task`] 完全一致: `spawner.must_spawn(debug_watch_task_uart(uart, config))`
+///
+/// # 工作原理
+///
+/// - **TX**: `uart.write()` → async DMA, 不阻塞 CPU
+/// - **RX**: `uart.read()` → nb 轮询, DMA 在后台填充缓冲区,
+///   每次迭代只读一个状态寄存器, 无数据立即返回 `WouldBlock`
+/// - 发送完上行后, 在 timer 周期内持续读下行命令, timer 到期发下一轮遥测
+///
+/// # 启动示例
+///
+/// ```ignore
+/// let uart = Uart::new(p.USART1, p.PB7, p.PB6, p.DMA1_CH0, p.DMA1_CH1, Irqs, config);
+/// spawner.must_spawn(debug_watch_task_uart(uart, watch_config!()));
+/// ```
+#[embassy_executor::task]
+pub async fn debug_watch_task_uart(
+    mut uart: Uart<'static, Async>,
+    config: WatchConfig,
+) -> ! {
+    let period = Duration::from_millis(config.period_ms);
+    let mut up_buf: [u8; UP_BUF_SIZE] = [0u8; UP_BUF_SIZE];
+    let mut down_buf: [u8; DOWN_BUF_SIZE] = [0u8; DOWN_BUF_SIZE];
+    let mut down_line: String<DOWN_LINE_SIZE> = String::new();
+
+    loop {
+        // ── 1. 上行: 序列化遥测 → async DMA TX ──
+        let mut up_len: usize = 0;
+        watch_table::with_table(|table| {
+            let n = table.len().min(config.max_entries as usize);
+            for i in 0..n {
+                if up_len + 64 > up_buf.len() { break; }
+                if let Some(entry) = table.get(i) {
+                    if let Some(val) = (entry.read_fn)(entry.ptr, entry.field_idx) {
+                        let pb = entry.path.as_bytes();
+                        let vb = val.as_bytes();
+                        let needed = pb.len() + 1 + vb.len() + 1;
+                        if up_len + needed > up_buf.len() { continue; }
+                        up_buf[up_len..up_len + pb.len()].copy_from_slice(pb);
+                        up_len += pb.len();
+                        up_buf[up_len] = b'=';
+                        up_len += 1;
+                        up_buf[up_len..up_len + vb.len()].copy_from_slice(vb);
+                        up_len += vb.len();
+                        up_buf[up_len] = b'\n';
+                        up_len += 1;
+                    }
+                }
+            }
+        });
+
+        if up_len > 0 {
+            let _ = uart.write(&up_buf[..up_len]).await;
+        }
+
+        // ── 2. select: timer 到点 vs DMA 收到下行命令 ──
+        // Uart 自带 async fn read(&mut self, &mut [u8]) — DMA 驱动, 不占 CPU
+        let tick = Timer::after(period);
+        let rx_fut = uart.read(&mut down_buf);
+
+        match select(tick, rx_fut).await {
+            Either::First(_) => {
+                // timer 到期 → 下一轮上行
+            }
+            Either::Second(rx_result) => {
+                if let Ok(()) = rx_result {
+                    // DMA 读成功 — 可能读到 0..n 字节
+                    for &byte in down_buf.iter() {
+                        if byte == 0 { break; } // 未填充部分跳过
+                        if byte == b'\n' {
+                            handle_cmd_uart_line(&down_line, &mut uart).await;
+                            down_line.clear();
+                        } else if down_line.len() < down_line.capacity() {
+                            let _ = down_line.push(byte as char);
+                        }
+                    }
+                }
+                // 收到命令后不等 timer, 直接开始下一轮上行
+            }
+        }
+    }
+}
+
+/// 处理一行下行命令, 回写 OK/ERR
+async fn handle_cmd_uart_line(line: &str, uart: &mut Uart<'static, Async>) {
+    let line = line.trim();
+    if line.is_empty() { return; }
+
+    let Some(rest) = line.strip_prefix("set ") else { return; };
+    let Some(sep) = rest.rfind(' ') else {
+        let _ = uart.write(b"ERR parse: expected 'set path value'\n").await;
+        return;
+    };
+
+    let path  = &rest[..sep];
+    let value = rest[sep + 1..].trim();
+    if path.is_empty() || value.is_empty() {
+        let _ = uart.write(b"ERR parse: empty path or value\n").await;
+        return;
+    }
+
+    match watch_table::apply_write(path, value) {
+        Ok(()) => {
+            let mut resp: String<128> = String::new();
+            let _ = core::write!(resp, "OK {}={}\n", path, value);
+            let _ = uart.write(resp.as_bytes()).await;
+        }
+        Err(reason) => {
+            let mut resp: String<128> = String::new();
+            let _ = core::write!(resp, "ERR {}: {}\n", path, reason);
+            let _ = uart.write(resp.as_bytes()).await;
+        }
+    }
+}
+
+// 注: 因为 embassy task 宏不接受泛型, 用户需写一行具体类型包装 task。
+// 详见 examples/rtt_debugtool_uart_demo.rs
+

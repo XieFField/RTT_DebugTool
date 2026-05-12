@@ -1,7 +1,7 @@
 [package]
 name = "rtt-debug-tool-mcu"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
 [dependencies]
 heapless = "0.9"
@@ -10,3 +10,5 @@ embassy-time = "0.5"
 rtt-target = "0.6"
 rtt-debug-tool-mcu-derive = { path = "../rtt-debug-tool-mcu-derive" }
 embassy-executor = { version = "0.9", features = ["executor-thread"] }
+embassy-futures = "0.1"
+embassy-stm32 = {version = "0.6.0", features = ["unstable-pac", "stm32h723zg"] }

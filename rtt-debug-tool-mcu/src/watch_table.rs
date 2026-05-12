@@ -32,7 +32,7 @@ use core::cell::RefCell;
 use critical_section::Mutex;
 use heapless::{String, Vec};
 
-use crate::watch_value::{WatchValueKind, Access, WatchValue};
+use crate::watch_value::{WatchValueKind, Access};
 
 // ═══════════════════════════════════════════════════════════
 // 注册条目
@@ -44,7 +44,7 @@ use crate::watch_value::{WatchValueKind, Access, WatchValue};
 /// 以及运行时读取/写入所需的函数指针和 type-erased 指针。
 ///
 /// # 字段说明
-///
+///s
 /// - `path`: 完整路径, 如 `"arm.pitch.rpm"`
 /// - `parent`: 父路径, 用于宿主机树形分组, 如 `"arm.pitch"`
 /// - `ptr`: type-erased 指针, 实际指向 `&'static RefCell<具体类型>`
