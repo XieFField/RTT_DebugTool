@@ -66,7 +66,7 @@ let uart = Uart::new(p.UART8,
         p.PE0, p.PE1, p.DMA1_CH7, p.DMA2_CH2, Irqs, uart_config).unwrap();
 ```
 
-2. 添加观测变量你所需要知道和做的 ==(重要)==
+2. 添加观测变量你所需要知道和做的 (重要)
 
 所有的注册宏如下
 ```rust
@@ -170,3 +170,17 @@ let watch_cfg = watch_config!();
 spawner.must_spawn(debug_watch_task(channels.up.0, channels.down.0, watch_cfg));
 ```
 ### 第三步 运行mcu程序和RTT-DebugTool
+1. SWD模式
+<img src = "./image/SWD1.png">
+
+<p style = "text-align = left">设置好对应的连接速度和选择正确的探针后，点击</p> <img src = "./image/start.png">
+速度越高连接越快，但丢包率也会上升。
+SWD模式的连接需要一点时间，我用正点原子的DAP-link在5000khz实测大概是3~4秒左右 
+
+<img src = "./image/SWD2.png">
+
+连接上后如图所示，RW的变量点击数据框即可编辑，操作逻辑与keil的watch窗口一般
+
+2. UART模式
+<img src = "./image/uart1.png">
+选择好对应的COM口和设置和mcu侧相同的波特率，
